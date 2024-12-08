@@ -7,6 +7,13 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.metrics import mean_squared_error
 import numpy as np
+
+# 设置随机种子
+seed = 42
+torch.manual_seed(seed)
+np.random.seed(seed)
+scale = 50
+
 # 读取 Parquet 文件
 df_train = pd.read_parquet('train.parquet')
 df_test= pd.read_parquet('test.parquet')
@@ -15,28 +22,29 @@ feature_columns = [f'X{i}' for i in range(559)]  # X0 到 X558
 # 创建一个空字典用于存储每一列的最小值
 min_values = {}
 for col in feature_columns:
-    #min_value = min(df_train[col].min(),df_test[col].min()) 
-    min_value = df_train[col].min()
+    min_value = min(df_train[col].min(),df_test[col].min()) 
     min_values[col] = min_value
+# 提取训练集的第2——第560列作为输入特征
 min_values_test = {}
 for col in feature_columns:
-    min_value_test = df_test[col].min()
-    min_values_test[col] = min_value_test
-# 提取训练集的第2——第560列作为输入特征
+    #min_value = min(df_train[col].min(),df_test[col].min()) 
+    min_value = df_test[col].min()
+    min_values_test[col] = min_value
 df_train_x = df_train.iloc[:, 1:560]
 df_test_x = df_test.iloc[:, 1:560]
 df_train_y= df_train.iloc[:, -8:]
+df_train_y = df_train_y * scale
 
 def add_log_transformed_columns(df, min_values):
     for col in feature_columns:
         new_col_name = f'Xlog_{col[1:]}'  
         min_value = min_values[col]
-        df[new_col_name] = np.log(df[col] - min_value + 0.00001)
+        df[new_col_name] = np.log(df[col] - min_value + 0.000001)
     return df
 
 # 对 df1 和 df2 进行处理
 df_train_x = add_log_transformed_columns(df_train_x, min_values)
-df_test_x = add_log_transformed_columns(df_test_x, min_values_test)
+df_test_x = add_log_transformed_columns(df_test_x, min_values)
 
 # 训练集中的训练集
 #df_train_x1 = df_train_x.iloc[:math.floor(0.7*len(df_train_x)),:]
@@ -108,7 +116,7 @@ x_data = torch.tensor(df_train_x.values, dtype=torch.float32)
 y_data = torch.tensor(df_train_y.values, dtype=torch.float32)
 dataset = TensorDataset(x_data, y_data)
 dataloader = DataLoader(dataset, batch_size=64, shuffle=True)
-num_epochs = 15
+num_epochs = 10
 for epoch in range(num_epochs):
     model.train()
     total_loss = 0
@@ -134,7 +142,7 @@ result=pd.DataFrame(columns=['ID', 'Y0', 'Y1', 'Y2', 'Y3', 'Y4', 'Y5', 'Y6', 'Y7
 for i in range(len(df_test)):
     test= torch.tensor(x_test.iloc[i].values,dtype=torch.float32)
     test_predictions = model(test)
-    new_row = list([df_test.iloc[i,0]] + [t.item() for t in test_predictions])
+    new_row = list([df_test.iloc[i,0]] + [t.item()/scale for t in test_predictions])
     result.loc[len(result)] = new_row
 result['ID'] = result['ID'].astype(int)
 result.to_csv('predictions_result.csv', index=False)
